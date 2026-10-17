@@ -28,8 +28,8 @@ services:
       - key: BULK_DISPATCH_BATCH_SIZE
         value: "100"
       - key: BULK_UPLOAD_MAX_BYTES
-        value: "1048576"
+        value: "10485760"
       - key: BULK_UPLOAD_MAX_ROWS
-        value: "5000"
+        value: "100000"
       - key: PROVIDER_CONFIG_REVISION
         value: initial

@@ -22,7 +22,7 @@ If creating a Web Service manually instead of a Blueprint: choose Docker, set Do
 - PostgreSQL, Redis and Node apps run under their own unprivileged users. A root supervisor manages ownership and ordered shutdown. If any child exits, it stops the others and exits unsuccessfully so Render can restart the container.
 - Migrations run after local dependencies are ready. On shutdown, apps stop first, then databases flush. Render allows 60 seconds for shutdown.
 - Uploads are temporary; completed admission data is in PostgreSQL. An interrupted upload may need retrying.
-- The starting settings allow one worker task at a time, 1 MiB uploads and 5,000 CSV rows. These are intentional reductions from local defaults. Tune only after measuring memory. Redis allows 192 MiB of dataset memory with `noeviction`; actual process memory can be higher during persistence. Memory exhaustion fails writes rather than discarding quota history.
+- Uploads support up to 10 MiB and 100,000 nonblank data records, matching the bulk contract and the assignment's 10k+ requirement. Streaming admission uses batches of 100 and one worker task runs at a time to limit simultaneous work without reducing supported import size. Processing uncached cities still takes time under the shared provider quotas. Redis allows 192 MiB of dataset memory with `noeviction`; actual process memory can be higher during persistence. Memory exhaustion fails writes rather than discarding quota history.
 - Existing local data is not imported. Never delete the persistent disk or Redis data to reset provider quotas. Losing Redis continuity can trigger a conservative 31-day provider hold.
 
 ## Operations in Render Shell

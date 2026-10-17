@@ -50,7 +50,9 @@ def start():
            '--mount', 'source=' + volume + ',target=/var/data',
            '-p', '127.0.0.1::10000', '-e', 'API_KEY=deployment-test-key',
            '-e', 'OPENWEATHER_API_KEY=unused-test-placeholder',
-           '-e', 'BULK_WORKER_CONCURRENCY=1', image)
+           '-e', 'BULK_WORKER_CONCURRENCY=1',
+           '-e', 'BULK_DB_BATCH_SIZE=100', '-e', 'BULK_DISPATCH_BATCH_SIZE=100',
+           '-e', 'BULK_UPLOAD_MAX_BYTES=10485760', '-e', 'BULK_UPLOAD_MAX_ROWS=100000', image)
     port = docker('port', name, '10000/tcp').rsplit(':', 1)[1]
     base = 'http://127.0.0.1:' + port
     wait_health()
@@ -75,6 +77,20 @@ try:
     start()
     assert http('/history', False)[0] == 401
     assert http('/history')[0] == 200
+    # Exercise admission beyond the assignment's 10k+ requirement. Duplicate
+    # records avoid spending provider quota or queuing thousands of test cities.
+    boundary = 'cityweather-large-boundary'
+    large_payload = (('--' + boundary + '\r\nContent-Disposition: form-data; name="file"; '
+                     'filename="large.csv"\r\nContent-Type: text/csv\r\n\r\ncity\n')
+                     + '"Large Test City,ZZ"\n' * 10001
+                     + '\r\n--' + boundary + '--\r\n').encode()
+    status, accepted_large = http('/bulk/import', data=large_payload,
+                                  content_type='multipart/form-data; boundary=' + boundary)
+    assert status == 202, (status, accepted_large)
+    _, large_status = http('/bulk/jobs/' + accepted_large['job_id'])
+    assert large_status['input_rows'] == 10001, large_status
+    assert large_status['admission_duplicate_rows'] == 10000, large_status
+    print('PASS: 10,001-row CSV accepted with exact row and duplicate counts', flush=True)
     # Country ZZ fails locally, so the worker can finish without provider calls.
     boundary = 'cityweather-test-boundary'
     payload = ('--' + boundary + '\r\nContent-Disposition: form-data; name="file"; '
