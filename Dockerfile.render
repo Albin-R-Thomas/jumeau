@@ -1,0 +1,31 @@
+FROM node:24-bookworm-slim AS build
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY prisma ./prisma
+RUN npm run generate
+COPY tsconfig.json ./
+COPY src ./src
+COPY tests ./tests
+RUN npm run build
+
+FROM postgres:17-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends python3 redis-server tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --uid 1000 --create-home app
+COPY --from=build /usr/local/bin/node /usr/local/bin/node
+WORKDIR /app
+# Keep Prisma CLI for runtime migrations: the persistent disk is absent at build time.
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist/src ./dist/src
+COPY --from=build /app/prisma ./prisma
+COPY package*.json ./
+COPY data ./data
+COPY scripts ./scripts
+COPY deploy/render-supervisor.py /app/deploy/render-supervisor.py
+ENV NODE_ENV=production NODE_OPTIONS=--max-old-space-size=128 \
+    ALL_IN_ONE=true BULK_STAGING_DIR=/tmp/cityweather-uploads
+EXPOSE 10000
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/bin/tini", "--", "python3", "-u", "/app/deploy/render-supervisor.py"]

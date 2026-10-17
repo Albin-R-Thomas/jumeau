@@ -12,6 +12,16 @@ const history: jest.Mocked<History> = {
 const service = { get: jest.fn().mockResolvedValue(weather) };
 const app = createApp("test-placeholder", service, history);
 const auth = (r: request.Test) => r.set("X-API-Key", "test-placeholder");
+test.each([false, "reject"])("unhealthy dependency probe returns 503: %s", async (mode) => {
+  const check = async () => {
+    if (mode === "reject") throw new Error("private dependency information");
+    return false;
+  };
+  const response = await request(createApp("test-placeholder", service, history, undefined, check))
+    .get("/health");
+  expect(response.status).toBe(503);
+  expect(response.body).toEqual({ status: "unavailable" });
+});
 test("health probe succeeds without credentials or provider access", async () => {
   const response = await request(app).get("/health");
   expect(response.status).toBe(200);

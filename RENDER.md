@@ -1,40 +1,56 @@
-# Deploy on Render
+# Render: one container and one persistent disk
 
-The root `render.yaml` creates four paid services in Singapore: the API, background worker, PostgreSQL 17 and persistent Render Key Value (Redis compatible). Review Render's cost summary before creating them. Render uses native Node.js; Docker Compose remains available locally.
+`render.yaml` deploys PostgreSQL 17, Redis, the API and worker together in a single paid Docker web service. No managed database, separate worker or Key Value service is created. The initial plan is `1c-2g` (2 GB RAM) with a 5 GB disk. Review the total in Render before creation; one larger service is not necessarily cheaper than every alternative.
 
-## Manual steps
+## Deploy
 
-1. Create a private GitHub repository and upload this project. Include `render.yaml`, `package-lock.json`, `src`, `tests`, `prisma` (including migrations), `scripts` and `data`. This folder currently has no Git repository. To use Git locally:
+1. Open https://dashboard.render.com and choose **New > Blueprint**.
+2. Connect **Albin-R-Thomas/jumeau**, branch **main**, using the root `render.yaml`.
+3. Enter your real `OPENWEATHER_API_KEY`. Render generates `API_KEY` for clients.
+4. Confirm the preview contains **one web service (`cityweather`) and one disk**, then review the price and create it. Do not separately create PostgreSQL, Redis or a worker.
+5. Leave Docker Command unset. Do not add a build or pre-deploy migration command: the disk is available only at runtime. The container initializes local storage and runs migrations before starting the apps.
+6. Wait for deployment. The public `/health` checks PostgreSQL, Redis and a live worker heartbeat. It may briefly return 503 while the worker initializes.
+7. Copy your public HTTPS URL and retrieve `API_KEY` from **cityweather > Environment**. Use it as the `X-API-Key` request header for `/weather?city=London`, `/history` and bulk routes. No key is required for `/health`. `/` has no homepage UI.
 
-   ```powershell
-   git init
-   git add .
-   git status --short
-   git commit -m "Prepare CityWeather for Render"
-   git branch -M main
-   git remote add origin https://github.com/YOUR_ACCOUNT/YOUR_REPOSITORY.git
-   git push -u origin main
-   ```
+If creating a Web Service manually instead of a Blueprint: choose Docker, set Dockerfile Path to `./Dockerfile.render`, select a paid 2 GB plan, attach a disk at exactly `/var/data`, set health path `/health`, add both API keys, and copy the small-workload settings from `render.yaml`. The regular `Dockerfile` runs only the API and is for Compose.
 
-   Review staged filenames before committing. Never upload `.env` or `.env.runtime`; `.gitignore` excludes them.
-2. Sign in at https://dashboard.render.com and connect your GitHub repository.
-3. Choose **New > Blueprint**, select the repository and branch, and use `render.yaml` from its root.
-4. Enter `OPENWEATHER_API_KEY` when prompted. Render generates the application's `API_KEY` and shares it with the worker. Database and Redis URLs are connected automatically. Do not use local Compose URLs.
-5. Review all four resources and their charges, then create the Blueprint. To change region, edit every `region` before creating it.
-6. Wait for the API and worker to deploy. Both run migrations before starting; Prisma serializes concurrent migrations. If an initial deploy encounters an advisory-lock timeout, redeploy that service after the other finishes migrating.
-7. Copy the API's public HTTPS URL from its service page. Securely copy the generated `API_KEY` from **cityweather-api > Environment** into your API client's secret storage.
-8. Test `GET https://YOUR-SERVICE.onrender.com/health` without authentication: expect `{"status":"ok"}`. Test `GET /weather?city=London` and `GET /history` with the header `X-API-Key: YOUR_GENERATED_APPLICATION_KEY`.
-9. In the worker's Render Shell, run `npm run ops -- status` to check worker heartbeats and queues. Test a bulk upload using the routes in `README.md` and confirm the worker completes it.
+## Storage and startup
 
-## Operations
+- PostgreSQL files: `/var/data/postgres`; Redis AOF: `/var/data/redis`.
+- The database password is generated once and saved in `/var/data/database-password`. Keep that file with the database; never replace it during a redeploy.
+- Local PostgreSQL and Redis bind to loopback only. Only the HTTP port is public. Do not set `DATABASE_URL`, `REDIS_URL`, `PGDATA` or override the entrypoint in Render.
+- PostgreSQL, Redis and Node apps run under their own unprivileged users. A root supervisor manages ownership and ordered shutdown. If any child exits, it stops the others and exits unsuccessfully so Render can restart the container.
+- Migrations run after local dependencies are ready. On shutdown, apps stop first, then databases flush. Render allows 60 seconds for shutdown.
+- Uploads are temporary; completed admission data is in PostgreSQL. An interrupted upload may need retrying.
+- The starting settings allow one worker task at a time, 1 MiB uploads and 5,000 CSV rows. These are intentional reductions from local defaults. Tune only after measuring memory. Redis allows 192 MiB of dataset memory with `noeviction`; actual process memory can be higher during persistence. Memory exhaustion fails writes rather than discarding quota history.
+- Existing local data is not imported. Never delete the persistent disk or Redis data to reset provider quotas. Losing Redis continuity can trigger a conservative 31-day provider hold.
 
-- This is an API with no homepage UI. `/health` checks the HTTP process only, without accessing the provider or checking ongoing dependency health. Business routes remain authenticated.
-- Builds install development dependencies for TypeScript and Prisma. Migrations run in the pre-deploy step, never during builds.
-- Upload staging is temporary; an upload interrupted by a deployment may need a retry. Parsed jobs and results live in PostgreSQL, so the worker needs no shared upload disk.
-- The new database starts empty. Existing local history/jobs require a separate backup and restore.
-- Keep provider budgets and `PROVIDER_CONFIG_REVISION` equal on API and worker. For provider credential rotation, update the API secret, increment the revision on both services in `render.yaml`, sync and redeploy both. Confirm the worker received the referenced secret.
-- Redis has `noeviction` and paid persistence. Render-managed persistence differs from Compose's `appendfsync always`; crash durability should not be assumed identical. Monitor memory: the quota ledger can reach 900,000 entries at default limits. Upgrade capacity as necessary. Never delete Redis to reset limits; lost quota continuity can trigger a conservative 31-day hold.
-- Monitor database storage and worker pending age. Starting plans do not guarantee capacity for maximum-size imports.
-- Future pushes trigger deployments. Use backward-compatible migrations because API and worker deploy independently.
+## Operations in Render Shell
 
-References: [Blueprints](https://render.com/docs/infrastructure-as-code), [Blueprint configuration](https://render.com/docs/blueprint-spec), [Key Value](https://render.com/docs/key-value).
+The supervisor generates local connection settings at runtime. Use this wrapper rather than invoking `ops.js` directly:
+
+```sh
+python3 /app/deploy/render-supervisor.py exec node dist/src/ops.js status
+```
+
+To run the existing bulk smoke script (makes real provider calls):
+
+```sh
+python3 /app/deploy/render-supervisor.py exec node scripts/smoke-bulk.cjs
+```
+
+For an additional PostgreSQL logical backup, run in Render Shell:
+
+```sh
+gosu postgres pg_dump -h /tmp -U cityweather -d cityweather -Fc -f /var/data/cityweather-backup.dump
+```
+
+Copy the backup off the service through your chosen secure backup storage. A backup on the same disk does not protect against losing/deleting that disk. Keep disk snapshots for whole-stack recovery, including Redis and the password file. PostgreSQL-only restore does not restore Redis quota accounting. A tested recovery procedure and regular off-service backups remain your responsibility.
+
+## Redeploys and limitations
+
+Push changes to `main` to deploy. All four processes restart together. A persistent disk prevents multiple replicas and zero-downtime deployment; brief downtime is expected. Do not use the free tier: it cannot attach the required persistent disk.
+
+Rotate the OpenWeather key in Environment and increment `PROVIDER_CONFIG_REVISION` in `render.yaml`, then redeploy. Both apps inherit the same settings. Monitor memory, disk capacity, `/health` and worker pending age. This setup is intended for small workloads, not high availability.
+
+References: [Docker](https://render.com/docs/docker), [persistent disks](https://render.com/docs/disks), [Blueprint configuration](https://render.com/docs/blueprint-spec).

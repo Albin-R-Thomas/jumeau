@@ -27,13 +27,19 @@ export function createApp(
   weather: Pick<WeatherService, "get">,
   history: History,
   bulk?: Router,
+  healthCheck?: () => Promise<boolean>,
 ) {
   const app = express();
   app.disable("x-powered-by");
   app.set("query parser", "simple");
   // Render probes this endpoint without client credentials.
-  app.get("/health", (_req, res) => {
-    res.json({ status: "ok" });
+  app.get("/health", async (_req, res) => {
+    try {
+      if (healthCheck && !(await healthCheck())) throw new Error("Unhealthy");
+      res.json({ status: "ok" });
+    } catch {
+      res.status(503).json({ status: "unavailable" });
+    }
   });
   app.use((req, res, next) => {
     const key = req.get("X-API-Key");

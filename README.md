@@ -1,6 +1,6 @@
 # CityWeather+
 
-For cloud deployment, see [the Render setup and manual steps](RENDER.md). The root `render.yaml` configures the API, worker, PostgreSQL and Redis.
+For cloud deployment, see [the Render setup and manual steps](RENDER.md). The root `render.yaml` runs the API, worker, PostgreSQL and Redis in one Docker container with a persistent disk. Local Compose still uses separate containers.
 
 CityWeather+ serves current weather, shared search history, and streamed bulk CSV imports through six authenticated routes. `job-implementation.md` defines the bulk contract; its recommended immutable `entries` plus canonical `outcomes` interpretation is implemented. Delivery is local: `http://localhost:3000`. Cloud deployment and submission remain operator handoff work.
 
