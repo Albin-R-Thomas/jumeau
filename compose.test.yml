@@ -1,0 +1,35 @@
+services:
+  postgres-test:
+    image: postgres:17-bookworm
+    profiles: [test]
+    environment:
+      {
+        POSTGRES_DB: test,
+        POSTGRES_USER: test,
+        POSTGRES_PASSWORD: test-placeholder,
+      }
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD, pg_isready, -U, test, -d, test]
+      interval: 1s
+      timeout: 5s
+      retries: 30
+  redis-test:
+    image: redis:7.4-bookworm
+    profiles: [test]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 1s
+      timeout: 5s
+      retries: 30
+  tests:
+    build: { context: ., target: test }
+    profiles: [test]
+    environment:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://test:test-placeholder@postgres-test:5432/test
+      REDIS_URL: redis://redis-test:6379
+    command: [sh, -c, "npm run migrate && npm test"]
+    depends_on:
+      postgres-test: { condition: service_healthy }
+      redis-test: { condition: service_healthy }

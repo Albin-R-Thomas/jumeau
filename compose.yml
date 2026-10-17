@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?required}
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  redis:
+    image: redis:7.4-bookworm
+    command:
+      [
+        redis-server,
+        --appendonly,
+        "yes",
+        --appendfsync,
+        always,
+        --maxmemory-policy,
+        noeviction,
+      ]
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  migrate:
+    build: { context: ., target: build }
+    command: [npm, run, migrate]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?required}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+  api:
+    build: { context: ., target: runtime }
+    init: true
+    environment: &application-environment
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=128
+      PORT: 3000
+      API_KEY: ${API_KEY:?required}
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY:?required}
+      DATABASE_URL: ${DATABASE_URL:?required}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # Enforce the updated policy even when existing private env files hold the old TTL.
+      WEATHER_CACHE_TTL_SECONDS: 900
+      PROVIDER_TIMEOUT_MS: ${PROVIDER_TIMEOUT_MS:-5000}
+      PROVIDER_MAX_RETRIES: ${PROVIDER_MAX_RETRIES:-2}
+      PROVIDER_CALLS_PER_MINUTE: ${PROVIDER_CALLS_PER_MINUTE:-55}
+      PROVIDER_CALLS_PER_MONTH: ${PROVIDER_CALLS_PER_MONTH:-900000}
+      PROVIDER_CONFIG_REVISION: ${PROVIDER_CONFIG_REVISION:-initial}
+      BULK_UPLOAD_TIMEOUT_MS: ${BULK_UPLOAD_TIMEOUT_MS:-120000}
+      BULK_STAGING_DIR: /tmp/cityweather-uploads
+      BULK_WORKER_CONCURRENCY: ${BULK_WORKER_CONCURRENCY:-5}
+      BULK_RECONCILE_INTERVAL_MS: ${BULK_RECONCILE_INTERVAL_MS:-5000}
+      BULK_UPLOAD_MAX_BYTES: ${BULK_UPLOAD_MAX_BYTES:-10485760}
+      BULK_UPLOAD_MAX_ROWS: ${BULK_UPLOAD_MAX_ROWS:-100000}
+      BULK_CITY_MAX_CODEPOINTS: ${BULK_CITY_MAX_CODEPOINTS:-200}
+      BULK_DB_BATCH_SIZE: ${BULK_DB_BATCH_SIZE:-500}
+      BULK_DISPATCH_BATCH_SIZE: ${BULK_DISPATCH_BATCH_SIZE:-500}
+      BULK_LEASE_SECONDS: ${BULK_LEASE_SECONDS:-90}
+      BULK_LEASE_HEARTBEAT_SECONDS: ${BULK_LEASE_HEARTBEAT_SECONDS:-15}
+      BULK_PENDING_BACKOFF_MAX_SECONDS: ${BULK_PENDING_BACKOFF_MAX_SECONDS:-300}
+      BULK_RETENTION_DAYS: ${BULK_RETENTION_DAYS:-30}
+      GEO_REVERIFY_DAYS: ${GEO_REVERIFY_DAYS:-30}
+      BULK_CURSOR_VERSION: 1
+    tmpfs:
+      ["/tmp/cityweather-uploads:uid=1000,gid=1000,mode=0700,size=134217728"]
+    ports: ["127.0.0.1:${PORT:-3000}:3000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+  worker:
+    build: { context: ., target: runtime }
+    command: [node, dist/src/bulk/worker.js]
+    init: true
+    environment: *application-environment
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+volumes:
+  postgres-data:
+  redis-data:

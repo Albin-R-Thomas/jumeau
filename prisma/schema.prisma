@@ -1,0 +1,210 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+enum HistorySource {
+  cache
+  provider
+}
+model SearchHistory {
+  id String @id @default(uuid()) @db.Uuid
+  city_name String
+  source HistorySource
+  timestamp DateTime @default(now()) @db.Timestamptz(3)
+  @@index([timestamp(sort: Desc), id(sort: Desc)])
+}
+
+enum AdmissionPhase {
+  preparing
+  ready
+  aborting
+}
+enum BulkStatus {
+  queued
+  running
+  pending
+  done
+  failed
+}
+enum ResultStatus {
+  pending
+  in_flight
+  succeeded
+  failed
+  merged
+}
+enum ResolutionPolicy {
+  http_first_match
+  bulk_unambiguous
+}
+model City {
+  id String @id @default(uuid()) @db.Uuid
+  name String
+  country String
+  state String?
+  lat Decimal @db.Decimal(20, 15)
+  lon Decimal @db.Decimal(20, 15)
+  verified_at DateTime @db.Timestamptz(3)
+  verification_version Int @default(1)
+  last_refreshed_at DateTime? @db.Timestamptz(3)
+  last_status String @default("pending")
+  last_error Json?
+  created_at DateTime @default(now()) @db.Timestamptz(3)
+  updated_at DateTime @updatedAt @db.Timestamptz(3)
+  identities PlaceIdentityKey[]
+  aliases CityAlias[]
+  @@index([last_refreshed_at])
+}
+model PlaceIdentityKey {
+  id String @id @default(uuid()) @db.Uuid
+  provider String @default("openweather")
+  signature_version Int @default(1)
+  signature String
+  city_id String @db.Uuid
+  city City @relation(fields: [city_id], references: [id])
+  @@unique([provider, signature_version, signature])
+}
+model CityAlias {
+  id String @id @default(uuid()) @db.Uuid
+  normalization_version Int @default(1)
+  normalized_query String
+  resolution_policy ResolutionPolicy
+  display_query String
+  city_id String? @db.Uuid
+  city City? @relation(fields: [city_id], references: [id])
+  verified_at DateTime? @db.Timestamptz(3)
+  revalidate_after DateTime? @db.Timestamptz(3)
+  verification_status String @default("verified")
+  metadata Json?
+  last_error Json?
+  version Int @default(1)
+  dispatches BulkDispatch[]
+  @@unique([normalization_version, normalized_query, resolution_policy])
+  @@index([revalidate_after])
+  @@index([city_id])
+}
+model QuotaSafetyGuard {
+  scope String @id
+  token String
+  initialized Boolean @default(false)
+  last_intent_at DateTime? @db.Timestamptz(3)
+  hold_until DateTime? @db.Timestamptz(3)
+  minute_budget Int
+  month_budget Int
+  blocked_revision String?
+  blocked_reason String?
+}
+model BulkJob {
+  job_id String @id @default(uuid()) @db.Uuid
+  admission_phase AdmissionPhase @default(preparing)
+  admission_generation Int @default(1)
+  admission_heartbeat DateTime @default(now()) @db.Timestamptz(3)
+  status BulkStatus @default(queued)
+  input_rows Int @default(0)
+  blank_rows Int @default(0)
+  rejected_rows Int @default(0)
+  admission_duplicate_rows Int @default(0)
+  alias_duplicate_rows Int @default(0)
+  admitted_entries Int @default(0)
+  total Int @default(0)
+  processed Int @default(0)
+  succeeded Int @default(0)
+  failed Int @default(0)
+  counters_version Int @default(1)
+  created_at DateTime @default(now()) @db.Timestamptz(3)
+  admitted_at DateTime? @db.Timestamptz(3)
+  started_at DateTime? @db.Timestamptz(3)
+  last_progress_at DateTime? @db.Timestamptz(3)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+  finished_at DateTime? @db.Timestamptz(3)
+  expires_at DateTime? @db.Timestamptz(3)
+  job_error Json?
+  entries BulkEntry[]
+  results BulkResult[]
+  rejections BulkRejectedRow[]
+  dispatches BulkDispatch[]
+  @@index([admission_phase, created_at])
+  @@index([status, expires_at])
+}
+model BulkEntry {
+  id String @id @default(uuid()) @db.Uuid
+  job_id String @db.Uuid
+  job BulkJob @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
+  ordinal Int
+  first_record_number Int
+  first_line Int
+  display_city String
+  normalized_key String
+  normalization_version Int @default(1)
+  occurrences Int @default(1)
+  result_id String? @db.Uuid
+  @@unique([job_id, ordinal])
+  @@unique([job_id, normalized_key, normalization_version])
+  @@index([result_id])
+}
+model BulkRejectedRow {
+  id String @id @default(uuid()) @db.Uuid
+  job_id String @db.Uuid
+  job BulkJob @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
+  record_number Int
+  row_number Int
+  end_line Int
+  codes String[]
+  detail String
+  value_preview String
+  @@unique([job_id, record_number])
+}
+model BulkResult {
+  id String @id @default(uuid()) @db.Uuid
+  job_id String @db.Uuid
+  job BulkJob @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
+  city_id String? @db.Uuid
+  display_city String
+  normalized_key String
+  status ResultStatus @default(pending)
+  merged_into_id String? @db.Uuid
+  initial_ordinal Int
+  last_error Json?
+  resume_at DateTime? @db.Timestamptz(3)
+  recovery_condition String?
+  attempts Int @default(0)
+  generation Int @default(1)
+  lease_token String? @db.Uuid
+  lease_expires_at DateTime? @db.Timestamptz(3)
+  weather Json?
+  source String?
+  fetched_at DateTime? @db.Timestamptz(3)
+  fresh_until DateTime? @db.Timestamptz(3)
+  observed_at DateTime? @db.Timestamptz(3)
+  completed_at DateTime? @db.Timestamptz(3)
+  provisional_weather Json?
+  provisional_expires_at DateTime? @db.Timestamptz(3)
+  dispatches BulkDispatch[]
+  @@index([job_id, status])
+  @@index([status, resume_at])
+  @@index([status, lease_expires_at])
+  @@index([job_id, completed_at(sort: Desc), id])
+}
+model BulkDispatch {
+  id String @id @default(uuid()) @db.Uuid
+  job_id String? @db.Uuid
+  job BulkJob? @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
+  result_id String? @db.Uuid
+  result BulkResult? @relation(fields: [result_id], references: [id], onDelete: Cascade)
+  alias_id String? @db.Uuid
+  alias CityAlias? @relation(fields: [alias_id], references: [id], onDelete: Cascade)
+  kind String
+  generation Int
+  due_at DateTime @default(now()) @db.Timestamptz(3)
+  delivery_status String @default("pending")
+  last_error String?
+  attempts Int @default(0)
+  enqueued_at DateTime? @db.Timestamptz(3)
+  @@unique([result_id, generation])
+  @@unique([alias_id, generation])
+  @@unique([job_id, kind, generation, result_id])
+  @@index([delivery_status, due_at])
+}
