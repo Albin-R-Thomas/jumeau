@@ -167,9 +167,19 @@ curl.exe -H 'X-API-Key: replace-with-application-key' 'http://localhost:3000/bul
 curl.exe -H 'X-API-Key: replace-with-application-key' 'http://localhost:3000/bulk/jobs/JOB_UUID/results?view=rejections&limit=20'
 ```
 
-`POST /bulk/import` accepts exactly one multipart file named `file`, a `.csv` filename, and `text/csv`, `application/csv`, or `application/octet-stream`. UTF-8 only, optional BOM, LF/CRLF, exactly one case-sensitive trimmed header `city`. Quote comma-qualified values. No other parts or query parameters are accepted. At most 10,485,760 **file bytes**, 100,000 nonblank data records and 200 Unicode code points per trimmed city value. Existing `/weather` length validation remains separate.
+`POST /bulk/import` accepts exactly one multipart file named `file`, a `.csv` filename, and `text/csv`, `application/csv`, or `application/octet-stream`. UTF-8 only, optional BOM, LF/CRLF, no header, one city per record (the first record is a city). Quote comma-qualified values. No other parts or query parameters are accepted. At most 10,485,760 **file bytes**, 100,000 nonblank data records and 200 Unicode code points per trimmed city value. Existing `/weather` length validation remains separate.
 
-The multipart file is spooled privately, then decoded fatally and parsed as a stream. Database batches contain at most 500 records; the full dataset is never buffered in JavaScript. Admission only checks structure/value size, never provider existence, syntax, country qualification or ambiguity. Extra-column and oversized records are retained as structured row rejections while admissible rows proceed. Empty single-field records are ignored and counted as blanks. Logical record numbers include the header and blank records; physical starting/end lines account for quoted newlines. Malformed quoting, bad header, invalid UTF-8, byte/row ceiling violations, or no admissible values reject the whole upload. Raw files are deleted on success/rejection; only entries and bounded row diagnostics persist.
+For a city-name-only example, upload `data/cities-names.csv`:
+
+```csv
+London
+Paris
+Tokyo
+Bengaluru
+Mumbai
+```
+
+The multipart file is spooled privately, then decoded fatally and parsed as a stream. Database batches contain at most 500 records; the full dataset is never buffered in JavaScript. Admission only checks structure/value size, never provider existence, syntax, country qualification or ambiguity. Extra-column and oversized records are retained as structured row rejections while admissible rows proceed. Empty single-field records are ignored and counted as blanks. Logical record numbers start at the first city and include blank records; physical starting/end lines account for quoted newlines. Malformed quoting, invalid UTF-8, byte/row ceiling violations, or no admissible values reject the whole upload. Raw files are deleted on success/rejection; only entries and bounded row diagnostics persist.
 
 Successful admission returns exactly `202 {"job_id":"UUID"}` and a status `Location`. It occurs only after complete staged membership, successful bootstrap queue acknowledgement, and a committed ready gate. Preparing jobs are hidden and nonexecutable. An enqueue timeout can leave a harmless message; it cannot open the gate. Abandoned staging is automatically removed after ten minutes. When storage is unavailable, cleanup is eventual after recovery. A crash after activation but before the client receives 202 may leave an accepted job unknown to that client.
 
@@ -189,7 +199,7 @@ Results default to `{job_id, view:"entries", entries:[...], outcomes:{RESULT_UUI
 
 Pagination defaults to 20, maximum 100. Strict versioned base64url cursors bind job, admission generation, view and last immutable ordinal. Entry membership remains stable through live merges; the same outcome can be referenced on different pages. Each page uses a repeatable-read database snapshot, without holding a transaction between requests. `view=rejections` pages all row diagnostics by record number. Unknown/expired/hidden job UUIDs return `404 BULK_JOB_NOT_FOUND`; malformed UUIDs/cursors/limits and unknown/repeated parameters return 400.
 
-Additional upload errors include 400 `INVALID_MULTIPART`, `INVALID_CSV_HEADER`, `MALFORMED_CSV`, `NO_ADMISSIBLE_CITIES`; 413 `UPLOAD_TOO_LARGE`, `TOO_MANY_ROWS`; 415 `UNSUPPORTED_MEDIA_TYPE`, `UNSUPPORTED_CSV_ENCODING`; 408 `UPLOAD_TIMEOUT`; 503 `BULK_ENQUEUE_FAILED` or `DEPENDENCY_UNAVAILABLE`. Fatal diagnostics are bounded to 100; accepted-job rejection pages expose every rejected record.
+Additional upload errors include 400 `INVALID_MULTIPART`, `MALFORMED_CSV`, `NO_ADMISSIBLE_CITIES`; 413 `UPLOAD_TOO_LARGE`, `TOO_MANY_ROWS`; 415 `UNSUPPORTED_MEDIA_TYPE`, `UNSUPPORTED_CSV_ENCODING`; 408 `UPLOAD_TIMEOUT`; 503 `BULK_ENQUEUE_FAILED` or `DEPENDENCY_UNAVAILABLE`. Fatal diagnostics are bounded to 100; accepted-job rejection pages expose every rejected record.
 
 ## Identity, worker recovery and retention
 

@@ -81,7 +81,7 @@ try:
     # records avoid spending provider quota or queuing thousands of test cities.
     boundary = 'cityweather-large-boundary'
     large_payload = (('--' + boundary + '\r\nContent-Disposition: form-data; name="file"; '
-                     'filename="large.csv"\r\nContent-Type: text/csv\r\n\r\ncity\n')
+                     'filename="large.csv"\r\nContent-Type: text/csv\r\n\r\n')
                      + '"Large Test City,ZZ"\n' * 10001
                      + '\r\n--' + boundary + '--\r\n').encode()
     status, accepted_large = http('/bulk/import', data=large_payload,
@@ -95,7 +95,7 @@ try:
     boundary = 'cityweather-test-boundary'
     payload = ('--' + boundary + '\r\nContent-Disposition: form-data; name="file"; '
                'filename="test.csv"\r\nContent-Type: text/csv\r\n\r\n'
-               'city\n"Test City,ZZ"\n\r\n--' + boundary + '--\r\n').encode()
+               '"Test City,ZZ"\n\r\n--' + boundary + '--\r\n').encode()
     status, accepted = http('/bulk/import', data=payload,
                             content_type='multipart/form-data; boundary=' + boundary)
     assert status == 202, (status, accepted)

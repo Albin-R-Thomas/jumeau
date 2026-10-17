@@ -100,7 +100,7 @@ export class BulkRepository {
       if (good.size)
         await tx.$executeRaw(Prisma.sql`
         INSERT INTO "BulkEntry" (id,job_id,ordinal,first_record_number,first_line,display_city,normalized_key,normalization_version,occurrences)
-        VALUES ${Prisma.join([...good.values()].map((r) => Prisma.sql`(${randomUUID()}::uuid,${job}::uuid,${r.record_number - 1},${r.record_number},${r.row_number},${r.city},${r.normalized_key},1,${r.occurrences})`))}
+        VALUES ${Prisma.join([...good.values()].map((r) => Prisma.sql`(${randomUUID()}::uuid,${job}::uuid,${r.record_number},${r.record_number},${r.row_number},${r.city},${r.normalized_key},1,${r.occurrences})`))}
         ON CONFLICT (job_id,normalized_key,normalization_version) DO UPDATE SET occurrences="BulkEntry".occurrences+EXCLUDED.occurrences`);
       if (rejected.length)
         await tx.bulkRejectedRow.createMany({

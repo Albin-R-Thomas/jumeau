@@ -117,7 +117,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
   };
   test("202 gate, complete immediate membership, partial rejections, deduplication, no admission provider calls", async () => {
     const id = await admitted(
-      `city\n"London,GB"\n" LONDON , gb "\nLondon,GB\n${"x".repeat(201)}\n"London,XYZ"\n\n`,
+      `"London,GB"\n" LONDON , gb "\nLondon,GB\n${"x".repeat(201)}\n"London,XYZ"\n\n`,
     );
     expect(fetcher).not.toHaveBeenCalled();
     const s = await invariant(id);
@@ -132,6 +132,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     });
     const p = await r.repo.page(id, "entries", 1);
     expect(p.entries![0]!.occurrences).toBe(2);
+    expect(p.entries![0]).toMatchObject({ ordinal: 1, record_number: 1, row_number: 1 });
     expect(p.next_cursor).toBeTruthy();
     const errs = await r.repo.page(id, "rejections", 1);
     expect(errs.errors).toHaveLength(1);
@@ -143,7 +144,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     expect(bootstrap?.data).toEqual({ job_id: id, generation: 1 });
   });
   test("canonical aliases merge into one outcome, pagination survives merge, finals are fenced and immutable", async () => {
-    const id = await admitted('city\n"London,GB"\n"Londres,GB"\n');
+    const id = await admitted('"London,GB"\n"Londres,GB"\n');
     const first = await r.repo.page(id, "entries", 1);
     const before = await r.db.bulkResult.findMany({ where: { job_id: id } });
     await processAll(id);
@@ -175,7 +176,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     ).toEqual(result.weather);
   });
   test("concurrent canonical bind leaves one live result and counter equations", async () => {
-    const id = await admitted('city\n"London,GB"\n"Londres,GB"\n"Londra,GB"\n');
+    const id = await admitted('"London,GB"\n"Londres,GB"\n"Londra,GB"\n');
     const results = await r.db.bulkResult.findMany({ where: { job_id: id } });
     await Promise.all(
       results.map((x) =>
@@ -191,7 +192,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     ).toBe(1);
   });
   test("ambiguity, not-found and syntax are permanent worker errors; HTTP first match remains successful", async () => {
-    const id = await admitted('city\nambiguous\nmissing\n"London,XYZ"\n');
+    const id = await admitted('ambiguous\nmissing\n"London,XYZ"\n');
     await processAll(id);
     expect(await invariant(id)).toMatchObject({
       status: "done",
@@ -221,8 +222,8 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
   });
   test.each([
     "city,country\nLondon,GB\n",
-    'city\n"London,GB"\n"unclosed',
-    "city\nLondon,GB\n",
+    '"London,GB"\n"unclosed',
+    "London,GB\n",
   ])("fatal upload %j publishes nothing and cleans up", async (csv) => {
     expect((await upload(csv)).status).toBe(400);
     expect(await r.db.bulkJob.count()).toBe(0);
@@ -242,7 +243,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
           .post("/bulk/import")
           .set("X-API-Key", r.cfg.API_KEY)
           .field("extra", "x")
-          .attach("file", Buffer.from("city\nLondon"), "x.csv")
+          .attach("file", Buffer.from("London"), "x.csv")
       ).status,
     ).toBe(400);
     expect(
@@ -250,8 +251,8 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
         await request(app)
           .post("/bulk/import")
           .set("X-API-Key", r.cfg.API_KEY)
-          .attach("file", Buffer.from("city\nLondon"), "x.csv")
-          .attach("file", Buffer.from("city\nParis"), "y.csv")
+          .attach("file", Buffer.from("London"), "x.csv")
+          .attach("file", Buffer.from("Paris"), "y.csv")
       ).status,
     ).toBe(400);
     const small = createApp(
@@ -265,7 +266,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
         await request(small)
           .post("/bulk/import")
           .set("X-API-Key", r.cfg.API_KEY)
-          .attach("file", Buffer.from("city\nLondon\nx"), "x.csv")
+          .attach("file", Buffer.from("London\nParis\nTokyo"), "x.csv")
       ).status,
     ).toBe(413);
     expect(await r.db.bulkJob.count()).toBe(0);
@@ -278,19 +279,19 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
         await original(id);
         throw new Error("unknown enqueue outcome");
       });
-    expect((await upload("city\nLondon\n")).status).toBe(503);
+    expect((await upload("London\n")).status).toBe(503);
     expect(await r.db.bulkJob.count()).toBe(0);
     spy.mockRestore();
     const activate = jest
       .spyOn(r.repo, "activate")
       .mockRejectedValueOnce(new Error("DB commit failure"));
-    expect((await upload("city\nLondon\n")).status).toBe(503);
+    expect((await upload("London\n")).status).toBe(503);
     activate.mockRestore();
     expect(await r.db.bulkJob.count()).toBe(0);
     expect(fetcher).not.toHaveBeenCalled();
   });
   test("provider transient failures stay pending, later delivery resumes without new upload", async () => {
-    const id = await admitted("city\nLondon\n");
+    const id = await admitted("London\n");
     fetcher.mockResolvedValueOnce(response(503, {}));
     await processAll(id);
     const result = await r.db.bulkResult.findFirstOrThrow({
@@ -310,7 +311,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     expect(await invariant(id)).toMatchObject({ status: "done", succeeded: 1 });
   });
   test("expired leases recover; old completion token cannot finalize", async () => {
-    const id = await admitted("city\nLondon\n"),
+    const id = await admitted("London\n"),
       item = await r.db.bulkResult.findFirstOrThrow({ where: { job_id: id } });
     const claim = (await r.repo.claim(item.id, 1))!;
     await r.db.bulkResult.update({
@@ -327,7 +328,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     expect((await invariant(id)).succeeded).toBe(1);
   });
   test("fresh cache shared between HTTP and bulk; persistent geo index rebuild and independent weather expiry", async () => {
-    const id = await admitted('city\n"London,GB"\n');
+    const id = await admitted('"London,GB"\n');
     await processAll(id);
     const calls = fetcher.mock.calls.length;
     expect(
@@ -350,16 +351,16 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     ).toBe(-1);
     await r.index.del(r.fetcher.key(alias.city_id!));
     expect(await r.db.city.count()).toBe(1);
-    const id2 = await admitted('city\n"London,GB"\n');
+    const id2 = await admitted('"London,GB"\n');
     await processAll(id2);
     expect(fetcher).toHaveBeenCalledTimes(calls + 1);
   });
   test("backup is provisional, expires by its own deadline, and never counts successful", async () => {
-    const first = await admitted("city\nLondon\n");
+    const first = await admitted("London\n");
     await processAll(first);
     const alias = (await r.resolver.lookup("London", "bulk_unambiguous"))!;
     await r.index.del(r.fetcher.key(alias.city_id!));
-    const second = await admitted("city\nLondon\n");
+    const second = await admitted("London\n");
     fetcher.mockResolvedValueOnce(response(503, {}));
     await processAll(second);
     const p = await r.repo.page(second, "entries", 20),
@@ -399,7 +400,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     });
   });
   test("provider auth blocks until configuration revision changes; restart does not repeatedly probe", async () => {
-    const id = await admitted("city\nLondon\n");
+    const id = await admitted("London\n");
     fetcher.mockResolvedValueOnce(response(401, {}));
     await processAll(id);
     const before = fetcher.mock.calls.length;
@@ -428,8 +429,8 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     }
   });
   test("job-bound, view-bound canonical cursors reject cross-use", async () => {
-    const a = await admitted("city\nLondon\nParis\n"),
-      b = await admitted("city\nLondon\nParis\n");
+    const a = await admitted("London\nParis\n"),
+      b = await admitted("London\nParis\n");
     const token = (await r.repo.page(a, "entries", 1)).next_cursor!;
     await expect(r.repo.page(b, "entries", 1, token)).rejects.toMatchObject({
       status: 400,
@@ -442,8 +443,8 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     ).rejects.toMatchObject({ status: 400 });
   });
   test("terminal retention preserves shared cities/history and old active jobs", async () => {
-    const old = await admitted("city\nLondon\n"),
-      done = await admitted("city\nLondon\n");
+    const old = await admitted("London\n"),
+      done = await admitted("London\n");
     await processAll(done);
     await r.db.bulkJob.update({
       where: { job_id: old },
@@ -460,7 +461,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     expect(await r.db.city.count()).toBe(1);
   });
   test("real BullMQ worker completes delivery and missing queued message is reconstructed", async () => {
-    const id = await admitted("city\nLondon\n");
+    const id = await admitted("London\n");
     await r.reconciler.tick();
     const deliveries = await r.queue.queue.getJobs(["waiting", "delayed"]);
     for (const d of deliveries) if (d.name === "process-city") await d.remove();
@@ -481,7 +482,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
   test.each(["before-cache", "after-cache", "after-commit"])(
     "SIGKILL at %s: persisted finals survive and unfinished work resumes",
     async (stage) => {
-      const id = await admitted("city\nLondon\n");
+      const id = await admitted("London\n");
       const child = fork(
         join(process.cwd(), "scripts/test-crash-worker.cjs"),
         [],
@@ -560,7 +561,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     },
   );
   test("all-city failure is done; job corruption is failed with unfinished work preserved", async () => {
-    const id = await admitted("city\nLondon\nParis\n");
+    const id = await admitted("London\nParis\n");
     const rows = await r.db.bulkResult.findMany({
       where: { job_id: id },
       orderBy: { initial_ordinal: "asc" },
@@ -579,10 +580,10 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     });
   });
   test("quota-blocked misses remain pending while previously certified fresh hits complete", async () => {
-    const initial = await admitted("city\nLondon\n");
+    const initial = await admitted("London\n");
     await processAll(initial);
     await r.store.cooldown(120);
-    const next = await admitted("city\nLondon\nUnknown\n");
+    const next = await admitted("London\nUnknown\n");
     await r.reconciler.tick();
     await processAll(next);
     expect(await invariant(next)).toMatchObject({
@@ -606,12 +607,12 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     expect((await invariant(next)).status).toBe("done");
   });
   test("30-day due geo is retained and fresh hit schedules independent revalidation", async () => {
-    const id = await admitted("city\nLondon\n");
+    const id = await admitted("London\n");
     await processAll(id);
     await r.db.cityAlias.updateMany({
       data: { revalidate_after: new Date(0) },
     });
-    const second = await admitted("city\nLondon\n");
+    const second = await admitted("London\n");
     await processAll(second);
     expect(fetcher).toHaveBeenCalledTimes(2);
     const dispatch = await r.db.bulkDispatch.findFirstOrThrow({
@@ -626,7 +627,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
   });
   test("declared non-UTF8 multipart charset is rejected", async () => {
     const boundary = "testboundary";
-    const body = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="test.csv"\r\nContent-Type: text/csv; charset=windows-1252\r\n\r\ncity\nLondon\n\r\n--${boundary}--\r\n`;
+    const body = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="test.csv"\r\nContent-Type: text/csv; charset=windows-1252\r\n\r\nLondon\n\r\n--${boundary}--\r\n`;
     const res = await request(app)
       .post("/bulk/import")
       .set("X-API-Key", r.cfg.API_KEY)
@@ -670,7 +671,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     );
   });
   test("Redis cache outage fails weather closed while history and durable results stay readable", async () => {
-    const id = await admitted("city\nLondon\n");
+    const id = await admitted("London\n");
     r.index.disconnect();
     try {
       expect(
@@ -693,7 +694,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     expect((await invariant(id)).succeeded).toBe(1);
   });
   test("DB commit interruption after cache write resumes from cache without duplicating success", async () => {
-    const id = await admitted("city\nLondon\n");
+    const id = await admitted("London\n");
     const spy = jest
       .spyOn(r.repo, "finish")
       .mockRejectedValueOnce(new Error("DB interrupted"));
@@ -712,11 +713,10 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
   test("exact 10 MiB file is admitted; one extra file byte is rejected despite multipart overhead", async () => {
     const maximum = 10485760,
       line = "London" + " ".repeat(193) + "\n";
-    const records = Math.floor((maximum - 5) / line.length);
+    const records = Math.floor(maximum / line.length);
     const exact = Buffer.from(
-      "city\n" +
-        line.repeat(records) +
-        " ".repeat(maximum - 5 - records * line.length),
+      line.repeat(records) +
+        " ".repeat(maximum - records * line.length),
     );
     expect(exact.length).toBe(maximum);
     const good = await upload(exact);
@@ -740,7 +740,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
       JSON.stringify(weather),
       86000,
     );
-    const id = await admitted('city\n"London,GB"\n');
+    const id = await admitted('"London,GB"\n');
     await processAll(id);
     expect(fetcher).toHaveBeenCalledTimes(1);
     const result = await r.db.bulkResult.findFirstOrThrow({
@@ -752,7 +752,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     ).toBeLessThanOrEqual(500000);
   });
   test("coordinate drift preserves UUID, invalidates older weather, and older rebuild cannot replace new index", async () => {
-    const id = await admitted("city\nLondon\n");
+    const id = await admitted("London\n");
     await processAll(id);
     const old = (await r.resolver.lookup("London", "bulk_unambiguous"))!;
     fetcher.mockResolvedValueOnce(response(200, [{ ...geo, lat: 51.6 }]));
@@ -783,7 +783,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     await expect(
       r.resolver.lookup("London", "bulk_unambiguous"),
     ).rejects.toMatchObject({ code: "IDENTITY_REVIEW_REQUIRED" });
-    const id = await admitted("city\nLondon\n");
+    const id = await admitted("London\n");
     await processAll(id);
     expect((await invariant(id)).recovery_conditions[0]!.condition).toBe(
       "identity_mapping_repaired",
@@ -815,7 +815,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
     ).rejects.toMatchObject({ code: "CITY_QUALIFICATION_UNVERIFIABLE" });
   });
   test("invalid provider payload stays pending with a typed reason", async () => {
-    const id = await admitted("city\nLondon\n");
+    const id = await admitted("London\n");
     fetcher
       .mockResolvedValueOnce(response(200, [geo]))
       .mockResolvedValueOnce(response(200, { invalid: true }));
@@ -832,7 +832,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
       .spyOn(r.repo, "stage")
       .mockRejectedValueOnce(new Error("DB interrupted"));
     try {
-      const res = await upload("city\nLondon\n");
+      const res = await upload("London\n");
       expect(res.status).toBe(503);
       expect(res.body.code).toBe("DEPENDENCY_UNAVAILABLE");
     } finally {
@@ -874,7 +874,7 @@ suite("bulk real PostgreSQL/Redis/BullMQ", () => {
         );
         req.once("error", reject);
         req.write(
-          '--slow\r\nContent-Disposition: form-data; name="file"; filename="slow.csv"\r\nContent-Type: text/csv\r\n\r\ncity\n',
+          '--slow\r\nContent-Disposition: form-data; name="file"; filename="slow.csv"\r\nContent-Type: text/csv\r\n\r\n',
         );
       });
       expect(status).toBe(408);

@@ -10,7 +10,7 @@
 4. Confirm the preview contains **one web service (`cityweather`) and one disk**, then review the price and create it. Do not separately create PostgreSQL, Redis or a worker.
 5. Leave Docker Command unset. Do not add a build or pre-deploy migration command: the disk is available only at runtime. The container initializes local storage and runs migrations before starting the apps.
 6. Wait for deployment. The public `/health` checks PostgreSQL, Redis and a live worker heartbeat. It may briefly return 503 while the worker initializes.
-7. Copy your public HTTPS URL and retrieve `API_KEY` from **cityweather > Environment**. Use it as the `X-API-Key` request header for `/weather?city=London`, `/history` and bulk routes. No key is required for `/health`. `/` has no homepage UI.
+7. Copy your public HTTPS URL and retrieve `API_KEY` from **cityweather > Environment**. Use the key as the `X-API-Key` request header for `/weather?city=London`, `/history` and bulk routes. CSV imports are headerless, with one city name per line. No key is required for `/health`. `/` has no homepage UI.
 
 If creating a Web Service manually instead of a Blueprint: choose Docker, set Dockerfile Path to `./Dockerfile.render`, select a paid 2 GB plan, attach a disk at exactly `/var/data`, set health path `/health`, add both API keys, and copy the small-workload settings from `render.yaml`. The regular `Dockerfile` runs only the API and is for Compose.
 

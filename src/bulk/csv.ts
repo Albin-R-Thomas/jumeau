@@ -96,15 +96,6 @@ export async function readCsv(
       );
       const end = start + embedded;
       line = end + 1;
-      if (record === 1) {
-        if (values.length !== 1 || values[0]!.trim() !== "city")
-          throw new ApiError(
-            400,
-            "INVALID_CSV_HEADER",
-            "CSV must have exactly one header named city.",
-          );
-        continue;
-      }
       const city = values[0]?.trim() ?? "";
       if (values.length === 1 && !city) {
         counts.blank_rows++;
@@ -151,12 +142,6 @@ export async function readCsv(
       }
     }
     await pumping;
-    if (!record)
-      throw new ApiError(
-        400,
-        "INVALID_CSV_HEADER",
-        "CSV must have a city header.",
-      );
     if (rows.length) await batch(rows);
     return counts;
   } catch (error) {

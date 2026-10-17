@@ -52,7 +52,6 @@ async function main() {
     for (const count of [100000, 100001]) {
       const path = join(directory, "cities.csv"),
         out = createWriteStream(path);
-      out.write("city\n");
       for (let i = 0; i < count; i++)
         if (!out.write(`City ${i}\n`)) await once(out, "drain");
       out.end();

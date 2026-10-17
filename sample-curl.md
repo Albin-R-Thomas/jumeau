@@ -159,7 +159,7 @@ if ($rejected.next_cursor) {
 }
 ```
 
-Expected codes: `INVALID_COLUMN_COUNT` at record 11 and `CITY_VALUE_TOO_LONG` at record 12. Row rejections do not increment the worker's failed-city count. Use each cursor only with its original job and view; history, entry and rejection cursors are distinct.
+Expected codes: `INVALID_COLUMN_COUNT` at record 10 and `CITY_VALUE_TOO_LONG` at record 11. Row rejections do not increment the worker's failed-city count. Use each cursor only with its original job and view; history, entry and rejection cursors are distinct.
 
 ## 6. DELETE /history — run last if you want to clear history
 

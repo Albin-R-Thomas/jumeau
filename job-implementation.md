@@ -34,9 +34,9 @@ Agreed application design limits, which Task.md itself does not specify:
 | Setting | Decision |
 |---|---|
 | File size | At most 10 MiB = 10,485,760 uploaded file bytes, before decoding; multipart overhead is excluded |
-| Rows | At most 100,000 nonblank data records, including structurally rejected and duplicate records; header excluded |
+| Rows | At most 100,000 nonblank data records, including structurally rejected and duplicate records; no header |
 | City length | At most 200 Unicode code points after trimming, before normalization; this does not change `/weather`'s existing 100-JavaScript-code-unit validation |
-| Input | Exactly one multipart file part named `file`, no additional file/text parts; UTF-8 CSV, optional UTF-8 BOM, exactly one header named `city` |
+| Input | Exactly one multipart file part named `file`, no additional file/text parts; UTF-8 CSV, optional UTF-8 BOM, no header, one city value per record |
 | Pagination | Default 20, maximum 100; immutable admission-entry ordering and separate rejected-row pagination |
 | Cache | Freshness 900 seconds; backup usability ends 86,400 seconds after last successful fetch |
 | Quotas | 55 reserved dispatch attempts per rolling 60 seconds; 900,000 per rolling 31 days; never per worker/job |
@@ -112,7 +112,7 @@ Counters and result transitions are one PostgreSQL transaction under a per-job r
 
 Use a streaming multipart parser (Busboy) and streaming CSV parser (`csv-parse`) with pinned dependencies and backpressure. Spool the file into a uniquely named private request directory under `/tmp/cityweather-uploads`, mode restricted to the API user. After the multipart envelope completes and exactly one correct file part is confirmed, read the file as a stream through a fatal UTF-8 decoder and CSV parser. This validates before enqueue without loading the file buffer into memory and satisfies Task.md's streaming intent. Raw file size is bounded; stream batches of at most 500 staged rows to PostgreSQL. Do not buffer a 100,000-row array or hold a transaction open while receiving the upload.
 
-Allow CSV quoting/escaped quotes and LF/CRLF. Header is the first logical record, after a possible BOM; require exactly `city` after trimming the header. Header names are case-sensitive; no additional columns/header names. A comma-qualified value must be quoted, for example `"Portland,OR,US"`. A header with extra columns is a whole-upload 400; a later data record with too many fields is a recoverable row rejection. Use the parser's relaxed column-count mode only to inspect/count those records, not to silently discard fields. Unclosed/malformed quoting is an unrecoverable whole-upload 400.
+Allow CSV quoting/escaped quotes and LF/CRLF. There is no header. The first logical record, after a possible BOM, is the first city value. A comma-qualified value must be quoted, for example `"Portland,OR,US"`. Any data record with too many fields, including the first, is a recoverable row rejection. Use the parser's relaxed column-count mode only to inspect/count those records, not to silently discard fields. Unclosed/malformed quoting is an unrecoverable whole-upload 400.
 
 Accept `.csv` files with MIME `text/csv`, `application/csv`, or `application/octet-stream`; validate the bytes rather than trusting the filename/MIME. Reject compressed archives, XLS/XLSX, a declared non-UTF-8 charset, or fatal UTF-8 decode failure with 415. A UTF-8 file whose CSV grammar is malformed gets 400. Do not require a city-like lexical pattern at this stage. Parser record buffering is bounded by the 10 MiB file ceiling; an oversized single value is skipped as a row, not incorrectly classified as a fatal parser-size error.
 
@@ -120,17 +120,17 @@ Counting rules:
 
 | Field/concept | Precise meaning |
 |---|---|
-| `record_number` | 1-based logical CSV record number, including the header and blank records; embedded quoted newlines do not create another record |
+| `record_number` | 1-based logical CSV record number, starting with the first city and including blank records; embedded quoted newlines do not create another record |
 | `row_number` | 1-based physical line on which that record starts; report `end_line` for multi-line records; CRLF counts as one line break |
 | Blank | A parsed record with exactly one field whose trimmed value is empty, including a bare empty line, whitespace-only line or `""`; ignore it, count in `blank_rows`, preserve numbering |
-| `input_rows` | All nonblank records after the header, before rejection/deduplication. Extra-column records count here, even when all fields are empty. The 100,001st such record rejects the upload with 413 |
+| `input_rows` | All nonblank records, before rejection/deduplication. Extra-column records count here, even when all fields are empty. The 100,001st such record rejects the upload with 413 |
 | `rejected_rows` | Nonblank records with not exactly one value or a trimmed value longer than 200 code points; record reason and continue. Trim precedes the length check; normalization follows it |
 | `admission_duplicate_rows` | Structurally admissible records whose normalized key was already admitted in this job; increment the first entry's occurrences and retain its original ordinal |
 | `admitted_entries` | Immutable count of distinct normalized values after structural row rejection; every entry gets an ordinal in first-occurrence order |
 | `alias_duplicate_rows` | Additional admitted entries later proved to share a canonical outcome; each eliminated processing unit contributes one, not its already-counted occurrences |
 | `duplicate_rows` | `admission_duplicate_rows + alias_duplicate_rows`; expose both subcounts to explain changes |
 
-Admission invariant: `input_rows = rejected_rows + admission_duplicate_rows + admitted_entries`. Processing invariant after canonical merging: `input_rows = rejected_rows + duplicate_rows + total`. Blank rows are excluded from both equations. If a record violates several structural rules, count one rejected row and include multiple reason codes; oversized values are checked before deduplication. Invalid syntax such as `London,XYZ` is admitted as text and later fails in the worker. A blank-only/header-only file or all-rejected file returns 400 `NO_ADMISSIBLE_CITIES`; duplicates of one admissible value still admit one city.
+Admission invariant: `input_rows = rejected_rows + admission_duplicate_rows + admitted_entries`. Processing invariant after canonical merging: `input_rows = rejected_rows + duplicate_rows + total`. Blank rows are excluded from both equations. If a record violates several structural rules, count one rejected row and include multiple reason codes; oversized values are checked before deduplication. Invalid syntax such as `London,XYZ` is admitted as text and later fails in the worker. A blank-only/empty file or all-rejected file returns 400 `NO_ADMISSIBLE_CITIES`; duplicates of one admissible value still admit one city.
 
 ### Gate processing across PostgreSQL and Redis
 
@@ -288,7 +288,7 @@ Content-Type: application/json
 
 | Status | Codes/examples |
 |---|---|
-| 400 | `INVALID_MULTIPART`, `INVALID_CSV_HEADER`, `MALFORMED_CSV`, `NO_ADMISSIBLE_CITIES`; missing/extra parts, malformed multipart envelope, unrecoverable CSV grammar |
+| 400 | `INVALID_MULTIPART`, `MALFORMED_CSV`, `NO_ADMISSIBLE_CITIES`; missing/extra parts, malformed multipart envelope, unrecoverable CSV grammar |
 | 413 | `UPLOAD_TOO_LARGE`, `TOO_MANY_ROWS` |
 | 415 | `UNSUPPORTED_MEDIA_TYPE`, `UNSUPPORTED_CSV_ENCODING` |
 | 401 | Existing `UNAUTHORIZED` |
@@ -431,7 +431,7 @@ Inject a Clock (`now`, scheduler/timer abstraction), Sleep, Random and IDs into 
 |---|---|
 | Existing API regression | Auth before dependencies; unchanged 100-character weather input grammar/response/error shape; first match; fresh hit/miss, 24h fallback/expiry without renewal; every successful HTTP request persists history including shared fetches; delete/cursor behavior unchanged |
 | Multipart/format | Missing file, wrong field, second file, extra text part, unsupported extension/MIME/charset, XLS/zip bytes, invalid UTF-8, BOM, LF/CRLF, malformed multipart, upload disconnect/timeout, file-byte limit exact/+1 |
-| CSV shape/counting | Required city header, duplicate/extra/missing headers, quoted commas/escaped quotes, embedded newline line numbers, blank/whitespace/quoted-empty records, extra/empty columns, malformed quotes late in file |
+| CSV shape/counting | Headerless city lists, preservation of the first city, first-record column errors, quoted commas/escaped quotes, embedded newline line numbers, blank/whitespace/quoted-empty records, extra/empty columns, malformed quotes late in file |
 | Structural admission | Exactly 200 vs 201 code points; emoji vs JS code units; trim before count; oversize before dedup; NFKC/case/space dedup; invalid syntax accepted for worker; no provider/index/existence check; zero admitted 400; exactly 100,000 vs 100,001 nonblank records |
 | Partial rejection | Valid+oversize+extra-column rows -> 202; correct rejection counts/reasons/line numbers and rejection pages; worker failed remains zero until actual city error |
 | Fatal atomicity | Last-row parser error/oversize file/row count -> no ready records/dispatch; queue.add rejection/ambiguous timeout; ready-commit failure after enqueue; temporary-file cleanup and delayed compensation under dependency outages |

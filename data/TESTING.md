@@ -1,6 +1,6 @@
 # Test every endpoint
 
-Use `api-test-cities.csv` from this directory. It is UTF-8 with one `city` header and deliberately mixes ordinary cities, a normalized duplicate, Unicode names, worker validation failures, two structural row rejections and two blank records. It should be accepted as one bulk job when dependencies are available. Live provider matches and ambiguity vary; a well-formed city is not a guaranteed successful bulk result.
+Use `api-test-cities.csv` from this directory. It is UTF-8 without a header and deliberately mixes ordinary cities, a normalized duplicate, Unicode names, worker validation failures, two structural row rejections and two blank records. It should be accepted as one bulk job when dependencies are available. Live provider matches and ambiguity vary; a well-formed city is not a guaranteed successful bulk result.
 
 The CSV is uploaded only to `POST /bulk/import`. Use city values from it for `/weather`; use the returned job UUID for bulk status/results. Bulk processing does not create search history, so make HTTP weather requests before testing history.
 
@@ -102,8 +102,8 @@ Entries keep immutable membership; outcomes contain current processing state and
 | `NoSuchCityForTesting12345,US` | Intended not-found lookup; actual provider response determines the outcome |
 | `London,XYZ` | Admitted, then permanent worker `INVALID_CITY_SYNTAX` |
 | `Portland,XX,US` | Admitted, then permanent worker `INVALID_CITY_SYNTAX` |
-| Unquoted `London,GB`, record 11 | Rejected row: `INVALID_COLUMN_COUNT` |
-| 201-character value, record 12 | Rejected row: `CITY_VALUE_TOO_LONG` |
+| Unquoted `London,GB`, record 10 | Rejected row: `INVALID_COLUMN_COUNT` |
+| 201-character value, record 11 | Rejected row: `CITY_VALUE_TOO_LONG` |
 | Blank line and quoted empty value | Ignored, `blank_rows=2` |
 | São Paulo and München | UTF-8 city names |
 
