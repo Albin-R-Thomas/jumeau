@@ -9,7 +9,6 @@ services:
     dockerfilePath: ./Dockerfile.render
     dockerContext: .
     healthCheckPath: /health
-    maxShutdownDelaySeconds: 60
     disk:
       name: cityweather-data
       mountPath: /var/data
