@@ -1,3 +1,11 @@
+# Submission review — 2026-10-18
+
+Rebuilt the current source using the Docker test target: strict TypeScript compilation passed, all three migrations applied to a fresh isolated PostgreSQL database, and **150 tests passed across 8 suites** (exit 0, 25.475 seconds). The suite uses real PostgreSQL/Redis with mocked provider transport; this does not verify a cloud deployment or live OpenWeather behavior. The large resource test was not repeated; its earlier measurements below remain historical.
+
+Restored the stopped local PostgreSQL/Redis containers, resolving the API/worker dependency restart loop. Git history and origin now exist; earlier no-Git statements below describe the earlier session. See SUBMISSION.md for remaining external delivery requirements.
+
+Host test attempts could not run because dependencies were not installed locally; Docker supplied the locked dependencies and completed the checks above.
+
 # Local bulk implementation verification — 2026-10-15
 
 Current application: **http://localhost:3000**, authenticated with the existing injected local API key. API, worker, PostgreSQL and Redis are running. No private environment values were printed or changed. No repository initialization, cloud operation, invitation, push or email was performed.

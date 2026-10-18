@@ -2,7 +2,7 @@
 
 For cloud deployment, see [the Render setup and manual steps](RENDER.md). The root `render.yaml` runs the API, worker, PostgreSQL and Redis in one Docker container with a persistent disk. Local Compose still uses separate containers.
 
-CityWeather+ serves current weather, shared search history, and streamed bulk CSV imports through six authenticated routes. `job-implementation.md` defines the bulk contract; its recommended immutable `entries` plus canonical `outcomes` interpretation is implemented. Delivery is local: `http://localhost:3000`. Cloud deployment and submission remain operator handoff work.
+CityWeather+ serves current weather, shared search history, and streamed bulk CSV imports through six authenticated routes. `job-implementation.md` defines the bulk contract; its recommended immutable `entries` plus canonical `outcomes` interpretation is implemented. Local URL: `http://localhost:3000`. Repository: https://github.com/Albin-R-Thomas/jumeau. A deployed URL has not yet been supplied or verified. See [the submission audit](SUBMISSION.md) for requirement coverage and remaining delivery items.
 
 ## Approach
 
@@ -277,6 +277,6 @@ Tests use isolated disposable dependencies only. All automated provider transpor
 
 Compose sets a 128 MiB V8 old-space budget for API/worker; the large test uses the same budget. This bounds heap growth between garbage collections, while database batching and stream backpressure bound retained dataset size. RSS also includes native Prisma, buffers and runtime code, so it exceeds V8 heap size.
 
-This directory has no Git metadata. No cloud URL, repository history, collaborator access, pushes or submission email is claimed. `prompts/manifest.md` records genuine transcript gaps. A later authorized submission needs hosting, a private repository/collaborator, real redacted conversation exports and the Task.md evaluation email; do not fabricate past daily commits or publish local credentials.
+Git history and an origin at `Albin-R-Thomas/jumeau` are present. Repository privacy, reviewer access and cloud deployment still require verification. `prompts/manifest.md` records genuine transcript gaps. Submission needs a working cloud URL, reviewer access, redacted conversation exports and the Task.md evaluation email; do not fabricate past daily updates or publish local credentials.
 
 `HANDOFF.md` provides the remaining external-delivery checklist and unsent communication templates. Current measured verification is in `VERIFICATION.md`: 148 Docker tests pass, including 36 bulk integration/recovery tests; the final 100,000-row API measurement peaked at 243.3 MiB.
