@@ -144,6 +144,13 @@ export class CityResolver {
       query,
       strict ? 5 : 1,
     );
+    // Unknown countries remain candidates: never silently discard ambiguity.
+    if (grammar?.country && candidates.some((c) => !c.country))
+      throw new ApiError(
+        400,
+        "CITY_QUALIFICATION_UNVERIFIABLE",
+        "Provider did not return country metadata for all candidate locations.",
+      );
     if (grammar?.country)
       candidates = candidates.filter((c) => c.country === grammar.country);
     if (grammar?.state) {
@@ -189,6 +196,12 @@ export class CityResolver {
     const chosen = candidates[0]!,
       sig = signature(chosen),
       normalized = normalize(query);
+    if (!chosen.country)
+      throw new ApiError(
+        400,
+        "CITY_QUALIFICATION_UNVERIFIABLE",
+        "Provider did not return country metadata for the selected location.",
+      );
     const alias = await this.db
       .$transaction(async (tx) => {
         // Stable lock order serializes aliases for the same exact identity; no network in tx.

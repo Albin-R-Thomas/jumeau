@@ -3,8 +3,10 @@ import { Config } from "./config";
 import { ApiError, invalidProviderPayload } from "./errors";
 import { Geo, geoSchema, Store, Weather } from "./types";
 const payloadSchema = z.object({
-  name: z.string().min(1),
-  sys: z.object({ country: z.string().regex(/^[A-Z]{2}$/) }),
+  name: z.string().optional(),
+  sys: z
+    .object({ country: z.string().regex(/^[A-Z]{2}$/).optional() })
+    .optional(),
   main: z.object({
     temp: z.number().finite(),
     humidity: z.number().min(0).max(100),
@@ -14,7 +16,9 @@ const payloadSchema = z.object({
 });
 export const candidateSchema = geoSchema.extend({
   name: z.string().min(1),
-  country: z.string().regex(/^[A-Z]{2}$/),
+  country: z
+    .union([z.string().regex(/^[A-Z]{2}$/), z.literal("")])
+    .default(""),
   state: z.string().optional(),
   local_names: z.record(z.string(), z.string()).optional(),
 });
@@ -33,7 +37,7 @@ export class Provider {
     path: string,
     parameters: Record<string, string>,
   ): Promise<unknown> {
-    const url = new URL(path, "https://api.openweathermap.org");
+    const url = new URL(this.cfg.PROVIDER_BASE_URL.replace(/\/$/, "") + path);
     url.search = new URLSearchParams({
       ...parameters,
       appid: this.cfg.OPENWEATHER_API_KEY,
@@ -156,7 +160,10 @@ export class Provider {
       throw invalidProviderPayload("Invalid OpenWeather geocoding response.");
     return parsed.data[0]!;
   }
-  async weather(geo: Geo): Promise<Weather> {
+  async weather(
+    geo: Geo,
+    location?: { name: string; country: string },
+  ): Promise<Weather> {
     const parsed = payloadSchema.safeParse(
       await this.request("/data/2.5/weather", {
         lat: String(geo.lat),
@@ -167,9 +174,17 @@ export class Provider {
     if (!parsed.success)
       throw invalidProviderPayload("Invalid OpenWeather weather response.");
     const p = parsed.data;
+    const city = location?.name ?? p.name;
+    const country = location?.country ?? p.sys?.country;
+    if (
+      !city?.trim() ||
+      !country ||
+      (location && p.sys?.country && p.sys.country !== location.country)
+    )
+      throw invalidProviderPayload("Invalid OpenWeather weather location metadata.");
     return {
-      city: p.name,
-      country: p.sys.country,
+      city,
+      country,
       temperature_celsius: p.main.temp,
       condition: p.weather[0]!.description,
       humidity_percent: p.main.humidity,

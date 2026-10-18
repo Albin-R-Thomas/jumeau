@@ -80,6 +80,13 @@ export class BulkProcessor {
     e: ApiError,
     provisional?: import("../weather-fetch").WeatherSnapshot,
   ) {
+    if (
+      (e.workerCode ?? e.code) === "PROVIDER_INVALID_PAYLOAD" &&
+      claim.attempts >= this.repo.cfg.BULK_INVALID_PAYLOAD_MAX_ATTEMPTS
+    ) {
+      await this.repo.finish(claim, { error: this.safe(e) });
+      return;
+    }
     if (e.code === "PROVIDER_AUTH_ERROR") await this.guard.blockAuth();
     const condition =
       e.code === "PROVIDER_AUTH_ERROR"

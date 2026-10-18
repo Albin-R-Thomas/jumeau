@@ -1,0 +1,5 @@
+simulation: provider-payloads
+routing: path
+mocks:
+  - routeKey: openweather
+    path: ../mocks/openweather/default.cjs

@@ -85,10 +85,13 @@ export class WeatherFetcher {
     let work = this.pending.get(key);
     if (!work) {
       work = (async () => {
-        const weather = await this.provider.weather({
-          lat: Number(alias.city!.lat),
-          lon: Number(alias.city!.lon),
-        });
+        const weather = await this.provider.weather(
+          {
+            lat: Number(alias.city!.lat),
+            lon: Number(alias.city!.lon),
+          },
+          { name: alias.city!.name, country: alias.city!.country },
+        );
         const fetched_at = this.now();
         const snapshot: WeatherSnapshot = {
           weather,
